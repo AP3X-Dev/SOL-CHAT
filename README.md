@@ -1,37 +1,58 @@
-# SOL-CHAT
+# 🚀 SOL-CHAT
 
-A secure, decentralized peer-to-peer messaging application built on Solana blockchain with end-to-end encryption and file sharing capabilities.
+> **The Future of Decentralized Communication**
 
-![SOL-CHAT Screenshot](https://raw.githubusercontent.com/AP3X-Dev/SOL-CHAT/refs/heads/main/public/screencapture.png)
+A revolutionary peer-to-peer messaging platform built on Solana blockchain featuring end-to-end encryption, real-time communication, username NFTs, and world-class user experience.
 
-## Overview
+![SOL-CHAT Banner](https://raw.githubusercontent.com/AP3X-Dev/SOL-CHAT/refs/heads/main/public/screencapture.png)
 
-SOL-CHAT is a modern messaging platform that leverages Solana blockchain technology to provide secure, decentralized communication. With its sleek dark mode UI and powerful encryption features, SOL-CHAT offers a private and user-friendly messaging experience for Solana users.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Solana](https://img.shields.io/badge/Built%20on-Solana-9945FF)](https://solana.com)
+[![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?logo=typescript&logoColor=white)](https://typescriptlang.org)
+[![React](https://img.shields.io/badge/React-20232A?logo=react&logoColor=61DAFB)](https://reactjs.org)
 
-## Features
+## ✨ Overview
 
-- **🔐 Secure Messaging**
-  - End-to-end encryption using TweetNaCl
-  - Messages stored locally with IPFS integration
-  - Solana wallet-based authentication
+SOL-CHAT has been completely transformed into a **next-generation decentralized messaging platform** that rivals Discord, Telegram, and WhatsApp while maintaining true Web3 principles. With revolutionary features like username NFTs, real-time communication, advanced encryption, and a stunning user interface, SOL-CHAT represents the future of digital communication.
 
-- **👥 User Management**
-  - Custom usernames and profiles
-  - Recent peers list with activity status
-  - Nickname support for contacts
+## 🌟 Revolutionary Features
 
-- **📎 File Sharing**
-  - Support for images and documents
-  - Built-in image preview
-  - Local file storage with IPFS integration
+### 🔐 **Military-Grade Security**
+- **End-to-End Encryption**: Advanced encryption with forward secrecy
+- **Message Signing**: Cryptographic verification of message authenticity
+- **Ephemeral Keys**: New encryption keys for every message
+- **Zero-Knowledge**: Your private keys never leave your device
 
-- **💫 Modern UI/UX**
-  - Sleek dark mode with Solana-inspired gradients
-  - Real-time message status updates
-  - Responsive design for desktop and mobile
-  - Interactive image preview modal
-  - Intuitive peer selection with recent contacts panel
-  - Quick action buttons for common tasks
+### � **Next-Gen Messaging**
+- **Real-time Communication**: Instant message delivery via WebSocket
+- **1-1 & Group Chats**: Direct messaging and group conversations
+- **Rich Media**: Send text, images, files, and voice messages
+- **Message Reactions**: Express yourself with emoji reactions
+- **Threading**: Reply to specific messages with context
+- **Typing Indicators**: See when others are typing
+- **Read Receipts**: Know when messages are delivered and read
+
+### 👤 **Username NFT System**
+- **Claim Your Identity**: Register unique usernames as NFTs
+- **Solana Name Service**: Full SNS integration and compatibility
+- **Tradeable Assets**: Username NFTs can be bought, sold, and transferred
+- **Verification System**: Verified badges for authenticated users
+- **Rarity Tiers**: Legendary, Epic, Rare, and Common usernames
+
+### 🎨 **World-Class UI/UX**
+- **Modern Design**: Beautiful glassmorphism effects and Solana gradients
+- **Smooth Animations**: 60fps animations powered by Framer Motion
+- **Three-Panel Layout**: Chat sidebar, main chat, and persistent peer list
+- **Dark/Light Themes**: Stunning themes that adapt to your preference
+- **Mobile Responsive**: Perfect experience on all devices
+- **Accessibility**: Full keyboard navigation and screen reader support
+
+### ⚡ **Performance & Scalability**
+- **Virtual Scrolling**: Handle thousands of messages smoothly
+- **Message Caching**: Lightning-fast loading of conversations
+- **Optimistic Updates**: Instant UI feedback for better UX
+- **Offline Support**: Queue messages when disconnected
+- **Real-time Sync**: Seamless synchronization across devices
 
 ## Tech Stack
 

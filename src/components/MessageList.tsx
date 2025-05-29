@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
-import { MessageSquare, FileText, CheckCircle, Clock, ExternalLink, Image as ImageIcon, X } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { MessageSquare, FileText, CheckCircle, Clock, ExternalLink, Image as ImageIcon, X, AtSign, Copy, Check } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { formatDisplayName } from '../lib/solana-name-service';
 import type { Message } from '../types/message';
 
 interface Props {
@@ -9,6 +11,23 @@ interface Props {
 
 export const MessageList: React.FC<Props> = ({ messages, currentWallet }) => {
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const copyToClipboard = async (text: string, messageId: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedMessageId(messageId);
+      setTimeout(() => setCopiedMessageId(null), 2000);
+    } catch (err) {
+      console.error('Failed to copy text:', err);
+    }
+  };
 
   const getStatusIcon = (status: Message['status']) => {
     switch (status) {
@@ -63,55 +82,92 @@ export const MessageList: React.FC<Props> = ({ messages, currentWallet }) => {
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-4 relative">
       {messages.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-full text-text-muted">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex flex-col items-center justify-center h-full text-text-muted"
+        >
           <img src="/logo.png" alt="SOL-CHAT Logo" className="w-24 h-auto mb-4 opacity-50" />
           <p>No messages yet. Start a conversation!</p>
-        </div>
+        </motion.div>
       ) : (
-        messages.map((message) => (
-          <div
-            key={message.id}
-            className={`flex ${
-              message.sender === currentWallet ? 'justify-end' : 'justify-start'
-            }`}
-          >
-            <div
-              className={`max-w-[70%] rounded-lg p-3 shadow-sm animate-fade-in ${
-                message.sender === currentWallet
-                  ? 'bg-gradient-tertiary text-white'
-                  : 'bg-card-highlight border border-border'
+        <AnimatePresence>
+          {messages.map((message, index) => (
+            <motion.div
+              key={message.id}
+              initial={{ opacity: 0, y: 20, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -20, scale: 0.95 }}
+              transition={{ duration: 0.2, delay: index * 0.05 }}
+              className={`flex ${
+                message.sender === currentWallet ? 'justify-end' : 'justify-start'
               }`}
             >
-              <div className="flex items-center gap-2 mb-1">
-                {message.senderUsername ? (
-                  <span className="text-sm font-medium">
-                    {message.senderUsername}
-                  </span>
-                ) : (
-                  <span className="text-xs opacity-75">
-                    {message.sender.slice(0, 4)}...{message.sender.slice(-4)}
-                  </span>
+              <div
+                className={`max-w-[70%] rounded-lg p-3 shadow-sm group relative ${
+                  message.sender === currentWallet
+                    ? 'bg-gradient-tertiary text-white'
+                    : 'bg-card-highlight border border-border'
+                }`}
+              >
+                {/* Message header */}
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    {message.senderUsername ? (
+                      <span className="text-sm font-medium flex items-center gap-1">
+                        {message.senderUsername.startsWith('@') ? (
+                          <AtSign className="w-3 h-3" />
+                        ) : null}
+                        {message.senderUsername}
+                      </span>
+                    ) : (
+                      <span className="text-xs opacity-75">
+                        {formatDisplayName(message.sender)}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Copy button */}
+                  {message.content && (
+                    <button
+                      onClick={() => copyToClipboard(message.content, message.id)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-black/10"
+                      title="Copy message"
+                    >
+                      {copiedMessageId === message.id ? (
+                        <Check className="w-3 h-3" />
+                      ) : (
+                        <Copy className="w-3 h-3" />
+                      )}
+                    </button>
+                  )}
+                </div>
+
+                {/* Message content */}
+                {message.content && (
+                  <p className="break-words whitespace-pre-wrap">{message.content}</p>
                 )}
+
+                {/* File preview */}
+                {message.fileUrl && renderFilePreview(message.fileUrl, message.fileName)}
+
+                {/* Message footer */}
+                <div className="flex items-center justify-between mt-2 text-xs opacity-75">
+                  <span>
+                    {new Date(message.timestamp).toLocaleTimeString()}
+                  </span>
+                  {message.sender === currentWallet && (
+                    <div className="ml-2">{getStatusIcon(message.status)}</div>
+                  )}
+                </div>
               </div>
-
-              {message.content && (
-                <p className="break-words whitespace-pre-wrap">{message.content}</p>
-              )}
-
-              {message.fileUrl && renderFilePreview(message.fileUrl, message.fileName)}
-
-              <div className="flex items-center justify-between mt-2 text-xs opacity-75">
-                <span>
-                  {new Date(message.timestamp).toLocaleTimeString()}
-                </span>
-                {message.sender === currentWallet && (
-                  <div className="ml-2">{getStatusIcon(message.status)}</div>
-                )}
-              </div>
-            </div>
-          </div>
-        ))
+            </motion.div>
+          ))}
+        </AnimatePresence>
       )}
+
+      {/* Auto-scroll anchor */}
+      <div ref={messagesEndRef} />
 
       {/* Image Preview Modal */}
       {expandedImage && (

@@ -1,174 +1,262 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
-import { PublicKey } from '@solana/web3.js';
-import { MessageList } from './components/MessageList';
-import { MessageInput } from './components/MessageInput';
-import { PeerList } from './components/PeerList';
-import { ProfileSetup } from './components/ProfileSetup';
+import { motion, AnimatePresence } from 'framer-motion';
 import { WalletContextProvider } from './components/WalletContextProvider';
 import { ThemeToggle, useTheme } from './components/ThemeProvider';
-import { MessageCircle, Users, Loader2, X } from 'lucide-react';
-import { uploadFile, storeMessages, retrieveMessages } from './lib/storage';
-import { encryptMessage } from './lib/crypto';
-import { addRecentPeer, getRecentPeers, getAddressActivity } from './lib/peers';
+import { ProfileSetup } from './components/ProfileSetup';
+import { AdvancedChatInterface } from './components/chat/AdvancedChatInterface';
+import { EnhancedPeerList } from './components/chat/EnhancedPeerList';
+import { ChatSidebar } from './components/chat/ChatSidebar';
+import { GroupChatManager } from './components/chat/GroupChatManager';
+import { UsernameNFTManager } from './components/chat/UsernameNFTManager';
+import { useChatStore } from './store/chat-store';
 import { getLocalProfile } from './lib/profile';
-import type { Message, Peer, UserProfile } from './types/message';
+import { getRealtimeService } from './lib/realtime-communication';
+import { getSolanaNameService } from './lib/solana-name-service';
+import {
+  MessageCircle,
+  Users,
+  Plus,
+  Settings,
+  Search,
+  Hash,
+  AtSign,
+  Crown,
+  Zap
+} from 'lucide-react';
+import type { Message, Peer, UserProfile, Chat } from './types/message';
 
 function MessengerApp() {
   const { publicKey, signMessage } = useWallet();
   const { connection } = useConnection();
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [lastCid, setLastCid] = useState<string | null>(null);
-  const [showPeers, setShowPeers] = useState(true);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [recentPeers, setRecentPeers] = useState<Peer[]>([]);
+  const { theme } = useTheme();
 
-  // Load initial data
+  // Chat store state
+  const {
+    currentUser,
+    activeChat,
+    chats,
+    peers,
+    connectionStatus,
+    setCurrentUser,
+    setActiveChat,
+    initializeRealtime,
+    addChat,
+    addPeer,
+  } = useChatStore();
+
+  // Local state
+  const [showGroupManager, setShowGroupManager] = useState(false);
+  const [showUsernameManager, setShowUsernameManager] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  // Initialize app when wallet connects
   useEffect(() => {
-    const loadInitialData = async () => {
-      if (publicKey) {
-        const userProfile = await getLocalProfile();
-        setProfile(userProfile);
+    const initializeApp = async () => {
+      if (publicKey && !isInitialized) {
+        try {
+          // Load user profile
+          const userProfile = await getLocalProfile();
+          if (userProfile) {
+            setCurrentUser(userProfile);
 
-        const peers = await getRecentPeers();
-        setRecentPeers(peers);
+            // Initialize real-time services
+            initializeRealtime();
 
-        // Load messages from local storage
-        const storedMessages = await retrieveMessages(null);
-        if (storedMessages.length > 0) {
-          // Filter messages for the current user
-          const userMessages = storedMessages.filter(
-            msg => msg.sender === publicKey.toString() || msg.recipient === publicKey.toString()
-          );
-          setMessages(userMessages);
+            // Initialize SNS service
+            const sns = getSolanaNameService(connection);
+
+            setIsInitialized(true);
+          }
+        } catch (error) {
+          console.error('Failed to initialize app:', error);
         }
       }
     };
-    loadInitialData();
-  }, [publicKey]);
 
-  // Poll for message status updates
-  useEffect(() => {
-    if (!publicKey || !connection) return;
+    initializeApp();
+  }, [publicKey, connection, isInitialized, setCurrentUser, initializeRealtime]);
 
-    const interval = setInterval(async () => {
-      const updatedMessages = await Promise.all(
-        messages.map(async (message) => {
-          if (message.sender === publicKey.toString() && message.status === 'sent') {
-            try {
-              const { active } = await getAddressActivity(connection, message.recipient);
-              if (active) {
-                return { ...message, status: 'delivered' };
-              }
-            } catch {
-              // Keep existing status if check fails
-            }
-          }
-          return message;
-        })
-      );
+  // Chat management functions
+  const createDirectChat = async (peerPublicKey: string, peerUsername?: string) => {
+    // Check if chat already exists
+    const existingChat = chats.find(chat =>
+      chat.type === 'direct' &&
+      chat.participants.includes(peerPublicKey) &&
+      chat.participants.includes(publicKey!.toString())
+    );
 
-      if (JSON.stringify(updatedMessages) !== JSON.stringify(messages)) {
-        setMessages(updatedMessages);
-        await storeMessages(updatedMessages);
-      }
-    }, 30000);
+    if (existingChat) {
+      setActiveChat(existingChat.id);
+      return existingChat.id;
+    }
 
-    return () => clearInterval(interval);
-  }, [publicKey, messages, connection]);
+    // Create new direct chat
+    const chatId = `direct_${publicKey!.toString()}_${peerPublicKey}_${Date.now()}`;
+    const newChat: Chat = {
+      id: chatId,
+      type: 'direct',
+      participants: [publicKey!.toString(), peerPublicKey],
+      createdBy: publicKey!.toString(),
+      createdAt: Date.now(),
+      lastActivity: Date.now(),
+      unreadCount: 0,
+      isPinned: false,
+      isMuted: false,
+      isArchived: false,
+    };
 
-  const handleSendMessage = async (content: string, recipientPublicKey: string, file?: File) => {
-    if (!publicKey || !signMessage || !profile) return;
+    addChat(newChat);
+    setActiveChat(chatId);
 
-    try {
-      let fileUrl;
-      let fileName;
-      if (file) {
-        fileUrl = await uploadFile(file);
-        fileName = file.name;
-      }
-
-      // For demo purposes, we'll use a simplified approach
-      // In a real app, we would use proper key derivation
-      const messageSignature = await signMessage(new TextEncoder().encode('Sign to encrypt message'));
-
-      // Generate a deterministic key from the signature
-      // This is a simplified approach for demo purposes
-      const { encrypted, nonce } = await encryptMessage(
-        content,
-        messageSignature,
-        new PublicKey(recipientPublicKey)
-      );
-
-      const newMessage: Message = {
-        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        sender: publicKey.toString(),
-        senderUsername: profile.username,
-        recipient: recipientPublicKey,
-        content: content, // Store unencrypted for demo
-        encrypted, // Store encrypted version
-        nonce,
-        timestamp: Date.now(),
-        fileUrl,
-        fileName,
-        status: 'sent'
+    // Add peer if not exists
+    const existingPeer = peers.find(p => p.publicKey === peerPublicKey);
+    if (!existingPeer) {
+      const newPeer: Peer = {
+        publicKey: peerPublicKey,
+        username: peerUsername,
+        lastSeen: Date.now(),
+        messageCount: 0,
+        isOnline: false,
+        status: 'offline',
       };
+      addPeer(newPeer);
+    }
 
-      // Update messages state immediately
-      const updatedMessages = [...messages, newMessage];
-      setMessages(updatedMessages);
+    return chatId;
+  };
 
-      // Store messages
-      await storeMessages(updatedMessages);
+  const createGroupChat = (name: string, participants: string[]) => {
+    const chatId = `group_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const newChat: Chat = {
+      id: chatId,
+      type: 'group',
+      name,
+      participants: [publicKey!.toString(), ...participants],
+      createdBy: publicKey!.toString(),
+      createdAt: Date.now(),
+      lastActivity: Date.now(),
+      unreadCount: 0,
+      isPinned: false,
+      isMuted: false,
+      isArchived: false,
+      permissions: {
+        canAddMembers: [publicKey!.toString()],
+        canRemoveMembers: [publicKey!.toString()],
+        canEditInfo: [publicKey!.toString()],
+        canDeleteMessages: [publicKey!.toString()],
+        isPublic: false,
+      },
+    };
 
-      // Update recent peers
-      await addRecentPeer(recipientPublicKey);
-      const updatedPeers = await getRecentPeers();
-      setRecentPeers(updatedPeers);
+    addChat(newChat);
+    setActiveChat(chatId);
+    setShowGroupManager(false);
 
-    } catch (error) {
-      console.error('Error sending message:', error);
-      throw error;
+    return chatId;
+  };
+
+  // Get active chat details
+  const getActiveChatDetails = () => {
+    if (!activeChat) return null;
+
+    const chat = chats.find(c => c.id === activeChat);
+    if (!chat) return null;
+
+    if (chat.type === 'direct') {
+      const otherParticipant = chat.participants.find(p => p !== publicKey!.toString());
+      const peer = peers.find(p => p.publicKey === otherParticipant);
+      return {
+        id: chat.id,
+        name: peer?.username || peer?.nickname || `${otherParticipant?.slice(0, 4)}...${otherParticipant?.slice(-4)}`,
+        recipientId: otherParticipant!,
+        isOnline: peer?.isOnline || false,
+        type: 'direct' as const,
+      };
+    } else {
+      return {
+        id: chat.id,
+        name: chat.name || 'Group Chat',
+        recipientId: '', // Not applicable for groups
+        isOnline: false,
+        type: 'group' as const,
+      };
     }
   };
 
-  const { theme } = useTheme();
+  const activeChatDetails = getActiveChatDetails();
 
   if (!publicKey) {
     return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
-        <div className="flex flex-col items-center mb-8">
-          <img src="/logo.png" alt="SOL-CHAT Logo" className="w-32 h-auto mb-4" />
-          <h1 className="text-4xl font-bold text-text mb-2">
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4 relative overflow-hidden">
+        {/* Animated Background */}
+        <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-secondary/10" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(var(--primary-rgb),0.1),transparent_50%)]" />
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8 }}
+          className="relative z-10 flex flex-col items-center mb-8"
+        >
+          <motion.img
+            src="/logo.png"
+            alt="SOL-CHAT Logo"
+            className="w-32 h-auto mb-4"
+            animate={{ rotate: [0, 5, -5, 0] }}
+            transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+          />
+          <h1 className="text-5xl font-bold bg-gradient-primary bg-clip-text text-transparent mb-2">
             SOL-CHAT
           </h1>
-          <p className="text-text-muted">
-            Secure messaging on Solana
+          <p className="text-text-muted text-lg">
+            Decentralized messaging on Solana
           </p>
-        </div>
+        </motion.div>
 
-        <div className="card p-8 max-w-md w-full text-center space-y-6 animate-fade-in shadow-elevation-2 border-border">
-          <h2 className="text-2xl font-bold text-text">
-            Welcome
-          </h2>
-          <p className="text-text-muted">
-            Connect your wallet to start messaging securely with other users.
-          </p>
-          <div className="flex justify-center">
-            <WalletMultiButton className="!bg-gradient-tertiary hover:opacity-90 transition-opacity !rounded-lg" />
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.6, delay: 0.2 }}
+          className="relative z-10 card p-8 max-w-md w-full text-center space-y-6 shadow-elevation-3 border-border backdrop-blur-sm bg-foreground/80"
+        >
+          <div className="space-y-4">
+            <h2 className="text-2xl font-bold text-text">Welcome to the Future</h2>
+            <p className="text-text-muted">
+              Connect your Solana wallet to start secure, decentralized messaging with end-to-end encryption.
+            </p>
+
+            <div className="flex items-center justify-center space-x-4 text-sm text-text-muted">
+              <div className="flex items-center space-x-1">
+                <Zap className="w-4 h-4 text-primary" />
+                <span>Real-time</span>
+              </div>
+              <div className="flex items-center space-x-1">
+                <Crown className="w-4 h-4 text-secondary" />
+                <span>Encrypted</span>
+              </div>
+              <div className="flex items-center space-x-1">
+                <AtSign className="w-4 h-4 text-tertiary" />
+                <span>Username NFTs</span>
+              </div>
+            </div>
           </div>
-          <div className="absolute top-4 right-4">
-            <ThemeToggle />
-          </div>
+
+          <WalletMultiButton className="!bg-gradient-primary hover:opacity-90 transition-all !rounded-xl !font-semibold !py-3 !px-6 !text-base shadow-lg hover:shadow-xl" />
+        </motion.div>
+
+        <div className="absolute top-4 right-4">
+          <ThemeToggle />
         </div>
       </div>
     );
   }
 
-  if (!profile) {
+  if (!currentUser) {
     return (
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen bg-background relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-secondary/5" />
         <div className="absolute top-4 right-4">
           <ThemeToggle />
         </div>
@@ -181,111 +269,188 @@ function MessengerApp() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      <header className="bg-foreground shadow-sm p-4 border-b border-border">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <img src="/logo.png" alt="SOL-CHAT Logo" className="h-8 w-auto" />
-            <h1 className="text-xl font-bold text-text">SOL-CHAT</h1>
-          </div>
+    <div className="min-h-screen bg-background flex flex-col relative overflow-hidden">
+      {/* Animated Background */}
+      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-secondary/5 pointer-events-none" />
+
+      {/* Header */}
+      <motion.header
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="relative z-10 bg-foreground/80 backdrop-blur-sm shadow-sm border-b border-border"
+      >
+        <div className="px-6 py-4 flex items-center justify-between">
           <div className="flex items-center space-x-4">
-            <div className="hidden md:flex items-center space-x-2 bg-card-highlight px-3 py-1.5 rounded-lg">
-              <span className="text-sm text-text-muted">
-                <span className="font-medium text-text">{profile.username}</span>
+            <motion.div
+              whileHover={{ scale: 1.05 }}
+              className="flex items-center space-x-3"
+            >
+              <img src="/logo.png" alt="SOL-CHAT Logo" className="h-8 w-auto" />
+              <h1 className="text-xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+                SOL-CHAT
+              </h1>
+            </motion.div>
+
+            {/* Connection Status */}
+            <div className="flex items-center space-x-2">
+              <div className={`w-2 h-2 rounded-full ${
+                connectionStatus === 'connected' ? 'bg-success' :
+                connectionStatus === 'reconnecting' ? 'bg-warning animate-pulse' :
+                'bg-error'
+              }`} />
+              <span className="text-xs text-text-muted">
+                {connectionStatus === 'connected' ? 'Connected' :
+                 connectionStatus === 'reconnecting' ? 'Reconnecting...' :
+                 'Disconnected'}
               </span>
             </div>
-            <button
-              onClick={() => setShowPeers(!showPeers)}
-              className="btn-icon hover:bg-card-highlight rounded-lg"
-              aria-label="Show peers"
-            >
-              <Users className="w-5 h-5 text-text-muted" />
-            </button>
-            <ThemeToggle />
-            <WalletMultiButton className="!bg-gradient-tertiary hover:opacity-90 transition-opacity !rounded-lg" />
-          </div>
-        </div>
-      </header>
-
-      <main className="flex-1 max-w-7xl mx-auto w-full my-6 flex flex-col md:flex-row gap-6 p-4">
-        <div className="flex-1 flex flex-col space-y-6">
-          {/* Quick Actions */}
-          <div className="card shadow-elevation-2 p-5 border-border">
-            <h2 className="font-semibold text-text mb-4">Quick Actions</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <button
-                className="flex flex-col items-center justify-center p-4 rounded-lg bg-card-highlight hover:bg-opacity-80 transition-colors relative"
-                onClick={() => alert("This feature is coming soon!")}
-              >
-                <div className="bg-gradient-primary p-2 rounded-lg mb-2">
-                  <Users className="w-5 h-5 text-white" />
-                </div>
-                <span className="text-sm font-medium">New Chat</span>
-                <span className="absolute top-2 right-2 text-xs px-1.5 py-0.5 bg-gradient-primary text-white rounded-full">Soon</span>
-              </button>
-              <button
-                className="flex flex-col items-center justify-center p-4 rounded-lg bg-card-highlight hover:bg-opacity-80 transition-colors relative"
-                onClick={() => alert("This feature is coming soon!")}
-              >
-                <div className="bg-gradient-secondary p-2 rounded-lg mb-2">
-                  <Users className="w-5 h-5 text-white" />
-                </div>
-                <span className="text-sm font-medium">My Contacts</span>
-                <span className="absolute top-2 right-2 text-xs px-1.5 py-0.5 bg-gradient-secondary text-white rounded-full">Soon</span>
-              </button>
-              <button
-                className="flex flex-col items-center justify-center p-4 rounded-lg bg-card-highlight hover:bg-opacity-80 transition-colors relative"
-                onClick={() => alert("This feature is coming soon!")}
-              >
-                <div className="bg-gradient-tertiary p-2 rounded-lg mb-2">
-                  <MessageCircle className="w-5 h-5 text-white" />
-                </div>
-                <span className="text-sm font-medium">Messages</span>
-                <span className="absolute top-2 right-2 text-xs px-1.5 py-0.5 bg-gradient-tertiary text-white rounded-full">Soon</span>
-              </button>
-            </div>
           </div>
 
-          {/* Messages */}
-          <div className="flex-1 card shadow-elevation-2 flex flex-col border-border">
-            <div className="p-4 border-b border-border">
-              <h2 className="font-semibold text-text">Messages</h2>
-            </div>
-            <MessageList
-              messages={messages}
-              currentWallet={publicKey.toString()}
-            />
-            <MessageInput
-              onSendMessage={handleSendMessage}
-              recentPeers={recentPeers}
-            />
-          </div>
-        </div>
-
-        <div className={`w-full md:w-80 card shadow-elevation-2 overflow-hidden border-border ${showPeers ? 'animate-slide-in' : 'hidden'}`}>
-          <div className="p-4 bg-foreground border-b border-border">
-            <div className="flex justify-between items-center">
-              <div className="flex items-center space-x-2">
-                <div className="bg-gradient-secondary p-1.5 rounded-lg">
-                  <Users className="w-4 h-4 text-white" />
-                </div>
-                <h2 className="font-semibold text-text">Recent Peers</h2>
+          <div className="flex items-center space-x-3">
+            {/* User Info */}
+            <div className="hidden md:flex items-center space-x-3 bg-card-highlight px-4 py-2 rounded-xl">
+              <div className="w-8 h-8 bg-gradient-primary rounded-full flex items-center justify-center">
+                <span className="text-white text-sm font-medium">
+                  {currentUser.username?.charAt(0)?.toUpperCase() || '?'}
+                </span>
               </div>
-              <button
-                onClick={() => setShowPeers(false)}
-                className="md:hidden p-1 rounded-lg hover:bg-card-highlight"
-              >
-                <X className="w-5 h-5 text-text-muted" />
-              </button>
+              <div className="text-left">
+                <p className="text-sm font-medium text-text">{currentUser.username}</p>
+                <p className="text-xs text-text-muted">
+                  {currentUser.solanaNameService ? 'SNS Verified' : 'Local Profile'}
+                </p>
+              </div>
             </div>
+
+            {/* Action Buttons */}
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setShowUsernameManager(true)}
+              className="p-2 hover:bg-card-highlight rounded-lg transition-colors"
+              title="Manage Username NFT"
+            >
+              <AtSign className="w-5 h-5 text-text-muted" />
+            </motion.button>
+
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setShowGroupManager(true)}
+              className="p-2 hover:bg-card-highlight rounded-lg transition-colors"
+              title="Create Group Chat"
+            >
+              <Plus className="w-5 h-5 text-text-muted" />
+            </motion.button>
+
+            <ThemeToggle />
+            <WalletMultiButton className="!bg-gradient-tertiary hover:opacity-90 transition-all !rounded-lg !text-sm" />
           </div>
-          <PeerList
-            onSelectPeer={(peer) => {
-              setShowPeers(false);
-            }}
-          />
         </div>
+      </motion.header>
+
+      {/* Main Content */}
+      <main className="flex-1 flex relative z-10">
+        {/* Chat Sidebar */}
+        <motion.div
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          className="w-80 bg-foreground border-r border-border flex flex-col"
+        >
+          <ChatSidebar
+            chats={chats}
+            activeChat={activeChat}
+            onChatSelect={setActiveChat}
+            onNewChat={() => setShowGroupManager(true)}
+          />
+        </motion.div>
+
+        {/* Chat Interface */}
+        <div className="flex-1 flex flex-col">
+          {activeChatDetails ? (
+            <AdvancedChatInterface
+              chatId={activeChatDetails.id}
+              recipientId={activeChatDetails.recipientId}
+              recipientName={activeChatDetails.name}
+              isOnline={activeChatDetails.isOnline}
+            />
+          ) : (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex-1 flex items-center justify-center bg-background"
+            >
+              <div className="text-center space-y-6 max-w-md">
+                <motion.div
+                  animate={{ rotate: [0, 5, -5, 0] }}
+                  transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+                >
+                  <MessageCircle className="w-24 h-24 mx-auto text-text-muted/50" />
+                </motion.div>
+                <div className="space-y-2">
+                  <h3 className="text-xl font-semibold text-text">Welcome to SOL-CHAT</h3>
+                  <p className="text-text-muted">
+                    Select a chat from the sidebar or start a new conversation to begin messaging.
+                  </p>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setShowGroupManager(true)}
+                    className="px-6 py-3 bg-gradient-primary text-white rounded-xl font-medium shadow-lg hover:shadow-xl transition-all"
+                  >
+                    Start New Chat
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setShowUsernameManager(true)}
+                    className="px-6 py-3 bg-gradient-secondary text-white rounded-xl font-medium shadow-lg hover:shadow-xl transition-all"
+                  >
+                    Claim Username NFT
+                  </motion.button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </div>
+
+        {/* Persistent Peer List */}
+        <motion.div
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          className="w-80 bg-foreground border-l border-border"
+        >
+          <EnhancedPeerList
+            peers={peers}
+            onPeerSelect={(peerPublicKey, peerUsername) => {
+              createDirectChat(peerPublicKey, peerUsername);
+            }}
+            onStartGroupChat={() => setShowGroupManager(true)}
+          />
+        </motion.div>
       </main>
+
+      {/* Modals */}
+      <AnimatePresence>
+        {showGroupManager && (
+          <GroupChatManager
+            onClose={() => setShowGroupManager(false)}
+            onCreateGroup={createGroupChat}
+            availablePeers={peers}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showUsernameManager && (
+          <UsernameNFTManager
+            onClose={() => setShowUsernameManager(false)}
+            currentUser={currentUser}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

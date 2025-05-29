@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, Edit2, Check } from 'lucide-react';
+import { Search, X, Edit2, Check, AtSign, Wallet } from 'lucide-react';
 import { validateSolanaAddress, setPeerNickname } from '../lib/peers';
 import { fetchProfile } from '../lib/profile';
+import { getSolanaNameService, parseUserInput, formatDisplayName } from '../lib/solana-name-service';
+import { useConnection } from '@solana/wallet-adapter-react';
 import type { Peer } from '../types/message';
 
 interface Props {
@@ -10,6 +12,7 @@ interface Props {
 }
 
 export const RecipientInput: React.FC<Props> = ({ onRecipientSelect, recentPeers }) => {
+  const { connection } = useConnection();
   const [input, setInput] = useState('');
   const [error, setError] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
@@ -18,6 +21,8 @@ export const RecipientInput: React.FC<Props> = ({ onRecipientSelect, recentPeers
   const [editingNickname, setEditingNickname] = useState<string | null>(null);
   const [nicknameInput, setNicknameInput] = useState('');
   const [isValidating, setIsValidating] = useState(false);
+  const [resolvedAddress, setResolvedAddress] = useState<string | null>(null);
+  const [inputType, setInputType] = useState<'username' | 'address' | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const validationTimeoutRef = useRef<NodeJS.Timeout>();
 
@@ -51,21 +56,65 @@ export const RecipientInput: React.FC<Props> = ({ onRecipientSelect, recentPeers
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const validateAndSelectAddress = async (address: string) => {
+  const validateAndSelectAddress = async (value: string) => {
     setIsValidating(true);
     try {
-      const isValid = await validateSolanaAddress(address);
-      if (isValid) {
-        setError('');
-        onRecipientSelect(address);
-        return true;
+      const parsed = parseUserInput(value);
+      setInputType(parsed.type);
+
+      if (parsed.type === 'username') {
+        // Try to resolve username via SNS
+        const sns = getSolanaNameService(connection);
+        const resolvedAddr = await sns.resolveUsername(parsed.value);
+
+        if (resolvedAddr) {
+          setResolvedAddress(resolvedAddr);
+          onRecipientSelect(resolvedAddr);
+          setSelectedPeerUsername(`@${parsed.value}`);
+          setError('');
+          return true;
+        } else {
+          setError(`Username "@${parsed.value}" not found`);
+          setSelectedPeerUsername(null);
+          setResolvedAddress(null);
+          onRecipientSelect('');
+          return false;
+        }
       } else {
-        setError('Invalid Solana address');
-        onRecipientSelect('');
-        return false;
+        // Direct address input
+        const isValid = await validateSolanaAddress(parsed.value);
+        if (isValid) {
+          setResolvedAddress(parsed.value);
+          onRecipientSelect(parsed.value);
+
+          // Try to get username for this address
+          try {
+            const sns = getSolanaNameService(connection);
+            const username = await sns.reverseResolve(parsed.value);
+            if (username) {
+              setSelectedPeerUsername(`@${username}`);
+            } else {
+              const profile = await fetchProfile(parsed.value);
+              setSelectedPeerUsername(profile?.username || null);
+            }
+          } catch (err) {
+            // Profile fetch failed, but address is valid
+            setSelectedPeerUsername(null);
+          }
+          setError('');
+          return true;
+        } else {
+          setError('Invalid Solana address');
+          setSelectedPeerUsername(null);
+          setResolvedAddress(null);
+          onRecipientSelect('');
+          return false;
+        }
       }
     } catch (err) {
-      setError('Invalid Solana address');
+      setError('Failed to resolve address');
+      setSelectedPeerUsername(null);
+      setResolvedAddress(null);
       onRecipientSelect('');
       return false;
     } finally {
@@ -147,7 +196,7 @@ export const RecipientInput: React.FC<Props> = ({ onRecipientSelect, recentPeers
           onChange={(e) => handleInputChange(e.target.value)}
           onFocus={() => setShowDropdown(true)}
           onKeyDown={handleKeyDown}
-          placeholder="Enter Solana address or search peers..."
+          placeholder="Enter @username or Solana address..."
           className={`input pr-20 bg-card-highlight border-border ${
             error ? 'border-error focus:ring-error/50' : ''
           }`}
@@ -164,6 +213,15 @@ export const RecipientInput: React.FC<Props> = ({ onRecipientSelect, recentPeers
             >
               <X className="w-4 h-4 text-text-muted" />
             </button>
+          )}
+          {inputType && !isValidating && (
+            <div className="p-1 rounded-lg bg-card-highlight" title={inputType === 'username' ? 'Username' : 'Wallet Address'}>
+              {inputType === 'username' ? (
+                <AtSign className="w-4 h-4 text-primary" />
+              ) : (
+                <Wallet className="w-4 h-4 text-secondary" />
+              )}
+            </div>
           )}
           <div className={`${isValidating ? 'bg-gradient-primary p-1 rounded-lg' : ''}`}>
             <Search className={`w-4 h-4 ${isValidating ? 'text-white animate-pulse' : 'text-text-muted'}`} />

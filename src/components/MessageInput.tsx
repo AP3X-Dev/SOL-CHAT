@@ -1,6 +1,8 @@
 import React, { useState, useRef } from 'react';
-import { Send, Paperclip, X, Image as ImageIcon, FileText } from 'lucide-react';
+import { Send, Paperclip, X, Image as ImageIcon, FileText, Smile } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { RecipientInput } from './RecipientInput';
+import { useToast } from './ui/Toast';
 import type { Peer } from '../types/message';
 
 interface Props {
@@ -9,6 +11,7 @@ interface Props {
 }
 
 export const MessageInput: React.FC<Props> = ({ onSendMessage, recentPeers }) => {
+  const { success, error } = useToast();
   const [message, setMessage] = useState('');
   const [recipientAddress, setRecipientAddress] = useState('');
   const [sending, setSending] = useState(false);
@@ -34,8 +37,10 @@ export const MessageInput: React.FC<Props> = ({ onSendMessage, recentPeers }) =>
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
-    } catch (error) {
-      console.error('Failed to send message:', error);
+      success('Message sent!', 'Your message has been encrypted and sent successfully.');
+    } catch (err) {
+      console.error('Failed to send message:', err);
+      error('Failed to send message', 'Please check your connection and try again.');
     } finally {
       setSending(false);
     }
@@ -139,19 +144,26 @@ export const MessageInput: React.FC<Props> = ({ onSendMessage, recentPeers }) =>
           className="input flex-1 bg-card-highlight border-border"
           disabled={sending}
         />
-        <button
+        <motion.button
           type="submit"
-          className={`p-2 rounded-lg ${
+          whileHover={{ scale: sending || !recipientAddress || (!message.trim() && !selectedFile) ? 1 : 1.05 }}
+          whileTap={{ scale: sending || !recipientAddress || (!message.trim() && !selectedFile) ? 1 : 0.95 }}
+          className={`p-2 rounded-lg transition-all duration-200 ${
             sending || !recipientAddress || (!message.trim() && !selectedFile)
               ? 'bg-card-highlight cursor-not-allowed opacity-50'
-              : 'bg-gradient-tertiary hover:opacity-90 transition-opacity'
+              : 'bg-gradient-tertiary hover:opacity-90 shadow-lg hover:shadow-xl'
           }`}
           disabled={sending || !recipientAddress || (!message.trim() && !selectedFile)}
           title={sending ? 'Sending...' : 'Send message'}
           aria-label={sending ? 'Sending...' : 'Send message'}
         >
-          <Send className={`w-5 h-5 text-white ${sending ? 'animate-pulse' : ''}`} />
-        </button>
+          <motion.div
+            animate={sending ? { rotate: 360 } : { rotate: 0 }}
+            transition={{ duration: 1, repeat: sending ? Infinity : 0, ease: 'linear' }}
+          >
+            <Send className={`w-5 h-5 text-white ${sending ? 'animate-pulse' : ''}`} />
+          </motion.div>
+        </motion.button>
       </div>
     </form>
   );
